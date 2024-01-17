@@ -1,17 +1,13 @@
-`ogaml` is an OCaml game of life.
+`ogaml` is an OCaml game of life. It needs to be optimized but is working properly, written in a functional style.
 
 ```console
 opam install graphics
-```
-
-```console
-# compile in native code:
 ocamlfind ocamlopt -o ogaml -linkpkg -package graphics oga.ml
 ./ogaml
 ```
 
 ```ocaml
-(* Using utop *)
+(* or using utop *)
 #require "graphics";;
 #use "oga.ml";;
 big_bang world;;
