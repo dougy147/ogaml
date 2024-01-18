@@ -4,12 +4,15 @@ Random.self_init ();;
 let title  = "OGaml - Conway's Game of Life in OCaml"
 let width  = 600
 let height = 600
-let grid   = 50
+let grid   = 65
 let scaled_width  = width  / grid ;;
 let scaled_height = height / grid ;;
-let normalized_width  = width  / scaled_width ;;
-let normalized_height = height / scaled_height ;;
+let cell_width  = width  / scaled_width ;;
+let cell_height = height / scaled_height ;;
 let size_to_string w h = " " ^ (string_of_int (w-scaled_width)) ^ "x" ^ (string_of_int (h-scaled_height));;
+
+let alive_color = 1
+let dead_color  = 0
 
 (*Init parameters*)
 type coord = {x: int; y: int}
@@ -23,18 +26,18 @@ let change_cell_neigh (c: cell) (n: int)  : cell = {c with neighbours = n}
 let change_cell_neigh_cpy (c: cell) (n: int) : cell = {c with neighbours_cpy = n}
 
 let neighbours (pos: coord) : coord list =
-  let nh = normalized_height and nw = normalized_width in
+  let nh = cell_height and nw = cell_width in
   let above_row = if pos.x = 1  then nh else pos.x - 1
   and under_row = if pos.x = nh then 1  else pos.x + 1
   and prev_col  = if pos.y = 1  then nw else pos.y - 1
   and next_col  = if pos.y = nw then 1  else pos.y + 1 in
   [ {x=above_row; y=prev_col}
-   ;{x=above_row; y=pos.y  }
+   ;{x=above_row; y=pos.y   }
    ;{x=above_row; y=next_col}
    ;{x=pos.x    ; y=prev_col}
    ;{x=pos.x    ; y=next_col}
    ;{x=under_row; y=prev_col}
-   ;{x=under_row; y=pos.y  }
+   ;{x=under_row; y=pos.y   }
    ;{x=under_row; y=next_col}
   ]
 
@@ -67,7 +70,7 @@ let random_world (width: int) (height: int): cell list=
   let r_world = randomize_rows [] width height in
   add_neighbours_count [] r_world r_world
 
-let update_neighbours_count (cells_list: cell list) (cell: cell): cell list =
+let update_neighbours_count (cells_list: cell list) (cell: cell) : cell list =
   (* I should link every cell to each of its neighbours at startup, that would avoid going through the whole world to change their values *)
   let neighbours_list = neighbours cell.coord in
   match cell.state with
@@ -75,6 +78,15 @@ let update_neighbours_count (cells_list: cell list) (cell: cell): cell list =
                |> List.map (fun x -> if List.mem x.coord neighbours_list then change_cell_neigh x (x.neighbours - 1) else x)
     | Alive -> cells_list
                |> List.map (fun x -> if List.mem x.coord neighbours_list then change_cell_neigh x (x.neighbours + 1) else x)
+
+(* should refactor these two functinos *)
+let update_neighbours_count_cpy (cells_list: cell list) (cell: cell) : cell list =
+  let neighbours_list = neighbours cell.coord in
+  match cell.state with
+    | Dead  -> cells_list
+               |> List.map (fun x -> if List.mem x.coord neighbours_list then change_cell_neigh_cpy x (x.neighbours_cpy - 1) else x)
+    | Alive -> cells_list
+               |> List.map (fun x -> if List.mem x.coord neighbours_list then change_cell_neigh_cpy x (x.neighbours_cpy + 1) else x)
 
 let next_world (cur_world: cell list): cell list =
   let rec aux next = function
@@ -94,7 +106,8 @@ let next_world (cur_world: cell list): cell list =
           let new_cell = change_cell_state cell new_state in
           let new_cell = change_cell_neigh_cpy new_cell new_cell.neighbours in
           (* Here is where CPU consumption increase : *)
-          let new_next = update_neighbours_count next new_cell in
+          let new_next = update_neighbours_count next new_cell in (* need also to change "neighbours_cpy" here !*)
+          let new_next = update_neighbours_count_cpy new_next new_cell in
           let new_rest = update_neighbours_count rest new_cell in
           aux (new_cell::new_next) new_rest
   in
@@ -108,39 +121,47 @@ fill_rect 0 0 width height;; (* black background "hack" *)
 
 let draw_point x y state size_w size_h =
   if state = 0 then set_color black else set_color white;
+  (*
   fill_rect ((x-1) * scaled_width) ((y-1) * scaled_height) size_w size_h;;
+  *)
+  fill_circle ((x-1) * scaled_width) ((y-1) * scaled_height) (size_w/2);;
 
 let print (world: cell list): unit =
+  set_color black;
+  fill_rect 0 0 width height;
   let rec aux = function
     | [] -> ()
     | cell :: tl ->
-        if cell.state = Alive then
-          draw_point cell.coord.x cell.coord.y 1 (scaled_width) (scaled_height)
-        else
-          draw_point cell.coord.x cell.coord.y 0 (scaled_width) (scaled_height);
+        draw_point cell.coord.x cell.coord.y alive_color (scaled_width) (scaled_height);
         aux tl
   in
-  aux world
+  aux (List.filter (fun c -> c.state = Alive) world)
+
+let display_info generation =
+  set_color cyan;
+  moveto 1 1;
+  let text = "Generation " ^ string_of_int generation in
+  draw_string text;;
 
 let bigbang w =
-  let rec aux generation w (paused: bool) =
+  let rec aux generation w (paused: bool) (display: bool) =
     let event = wait_next_event [ Graphics.Poll ] in
     if event.Graphics.keypressed then
       match (read_key ()) with
-      | 'r'    -> aux 0 (random_world normalized_width normalized_height) false
-      | ' '    -> aux generation w (not paused)
+      | 'r'    -> aux 0 (random_world cell_width cell_height) false display
+      | ' '    -> aux generation w (not paused) display
       | '\027' -> close_graph()
       | _      -> ()
     else
       if paused = true then
-        aux generation w paused
+        aux generation w paused display
       else
         print w;
-        (*Printf.printf "\n%d generations.\n" generation;*)
-        aux (generation+1) (next_world w) paused
+        display_info generation;
+        aux (generation+1) (next_world w) paused display
   in
-  aux 0 w false
+  aux 0 w false true
 
-let world = random_world normalized_width normalized_height
+let world = random_world cell_width cell_height
 
 let () = bigbang world
