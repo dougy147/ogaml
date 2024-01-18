@@ -2,7 +2,7 @@ open Graphics;;
 Random.self_init ();;
 
 let title  = "OGaml - Conway's Game of Life in OCaml"
-let width  = 800
+let width  = 600
 let height = 600
 let grid   = 50
 let scaled_width  = width  / grid ;;
@@ -122,16 +122,24 @@ let print (world: cell list): unit =
   in
   aux world
 
-(* Launch life *)
 let bigbang w =
-  let rec aux generation w =
-    if key_pressed () = true then close_graph() else
-    if button_down () = true then aux generation w else (* pause if click *)
-      print w;
-      (*Printf.printf "\n%d generations.\n" generation;*)
-      aux (generation+1) (next_world w)
+  let rec aux generation w (paused: bool) =
+    let event = wait_next_event [ Graphics.Poll ] in
+    if event.Graphics.keypressed then
+      match (read_key ()) with
+      | 'r'    -> aux 0 (random_world normalized_width normalized_height) false
+      | ' '    -> aux generation w (not paused)
+      | '\027' -> close_graph()
+      | _      -> ()
+    else
+      if paused = true then
+        aux generation w paused
+      else
+        print w;
+        (*Printf.printf "\n%d generations.\n" generation;*)
+        aux (generation+1) (next_world w) paused
   in
-  aux 0 w
+  aux 0 w false
 
 let world = random_world normalized_width normalized_height
 
