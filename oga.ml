@@ -2,9 +2,9 @@ open Graphics;;
 Random.self_init ();;
 
 let title  = "OGaml - Conway's Game of Life in OCaml"
-let width  = 1024
-let height = 1024
-let grid   = 40
+let width  = 800
+let height = 600
+let grid   = 50
 let scaled_width  = width  / grid ;;
 let scaled_height = height / grid ;;
 let normalized_width  = width  / scaled_width ;;
@@ -14,60 +14,91 @@ let size_to_string w h = " " ^ (string_of_int (w-scaled_width)) ^ "x" ^ (string_
 (*Init parameters*)
 type coord = {x: int; y: int}
 type state = Dead | Alive
-type cell  = {coord: coord; state: state}
-let  birth = 0.22 ;; (* Probability of a cell being alive at startup *)
+type cell  = {coord: coord; state: state; neighbours: int; neighbours_cpy: int}
+let init_life_prob = 0.06 (* Probability of a cell being alive at startup *)
 
-let neighbours (coord: coord) : coord list =
+(* Functional way of changing records (see "Real World Ocaml" p.94) *)
+let change_cell_state (c: cell) (s: state): cell = {c with state = s}
+let change_cell_neigh (c: cell) (n: int)  : cell = {c with neighbours = n}
+let change_cell_neigh_cpy (c: cell) (n: int) : cell = {c with neighbours_cpy = n}
+
+let neighbours (pos: coord) : coord list =
   let nh = normalized_height and nw = normalized_width in
-  let above_row = if coord.x = 1 then nh else coord.x - 1 in
-  let under_row = if coord.x = nh then 1 else coord.x + 1 in
-  let prev_col  = if coord.y = 1 then nw else coord.y - 1 in
-  let next_col  = if coord.y = nh then 1 else coord.y + 1 in
+  let above_row = if pos.x = 1  then nh else pos.x - 1
+  and under_row = if pos.x = nh then 1  else pos.x + 1
+  and prev_col  = if pos.y = 1  then nw else pos.y - 1
+  and next_col  = if pos.y = nw then 1  else pos.y + 1 in
   [ {x=above_row; y=prev_col}
-   ;{x=above_row; y=coord.y  }
+   ;{x=above_row; y=pos.y  }
    ;{x=above_row; y=next_col}
-   ;{x=coord.x  ; y=prev_col}
-   ;{x=coord.x  ; y=next_col}
+   ;{x=pos.x    ; y=prev_col}
+   ;{x=pos.x    ; y=next_col}
    ;{x=under_row; y=prev_col}
-   ;{x=under_row; y=coord.y  }
+   ;{x=under_row; y=pos.y  }
    ;{x=under_row; y=next_col}
   ]
 
-let count_neighbours (coord: coord) (world: cell list) = (* Returns the number of Alive neighbours *)
-  let neighbours_list = neighbours coord in
-  let cur_neighbours   = List.filter (fun cell -> List.mem cell.coord neighbours_list) world in
-  let alive_neighbours = List.filter (fun cell -> cell.state = Alive) cur_neighbours in
-  List.length alive_neighbours
+let random_world (width: int) (height: int): cell list=
+  let count_neighbours (pos: coord) (world: cell list) =
+    let neighbours_list  = neighbours pos in
+    let cur_neighbours   = List.filter (fun c -> List.mem c.coord neighbours_list) world in
+    let alive_neighbours = List.filter (fun c -> c.state = Alive) cur_neighbours in
+    List.length alive_neighbours
+  in
+  let random_init_state (alea: float) =
+    if alea < init_life_prob then Alive else Dead
+  in
+  let rec randomize_cols acc_cols (col_index: int) (row: int): cell list =
+    let state = random_init_state (Random.float 1.) in
+    if col_index = 0 then acc_cols
+    else randomize_cols ({coord={x=row;y=col_index};state=state;neighbours=0;neighbours_cpy=0}::acc_cols) (col_index-1) row
+  in
+  let rec randomize_rows acc_rows width height: cell list =
+    if height = 0 then acc_rows
+    else randomize_rows ((randomize_cols [] width height) @ acc_rows) width (height-1)
+  in
+  let rec add_neighbours_count next cur_world = function
+    | [] -> next
+    | cell :: rest ->
+        let c = change_cell_neigh cell (count_neighbours cell.coord cur_world) in
+        let c = change_cell_neigh_cpy c c.neighbours in
+        add_neighbours_count (c::next) cur_world rest
+  in
+  let r_world = randomize_rows [] width height in
+  add_neighbours_count [] r_world r_world
 
-let next_cell (state: state) (neighbours_num: int) =
-  match state with (* Conway's rules *)
-  | Alive when neighbours_num = 2 -> Alive
-  | _ when neighbours_num = 3 -> Alive
-  | _ -> Dead
-
-let random_world w h: cell list=
-  let random_state n =
-    if n < birth then Alive else Dead
-  in
-  let rec randomize_cols col col_index row: cell list =
-    let state = random_state (Random.float 1.) in
-    if col_index = 0 then col else randomize_cols ({coord={x=row;y=col_index};state=state}::col) (col_index-1) row
-  in
-  let rec randomize_rows acc_world w h: cell list =
-    if h = 0 then acc_world else randomize_rows ((randomize_cols [] w h) @ acc_world) w (h-1)
-  in
-  randomize_rows [] w h
+let update_neighbours_count (cells_list: cell list) (cell: cell): cell list =
+  (* I should link every cell to each of its neighbours at startup, that would avoid going through the whole world to change their values *)
+  let neighbours_list = neighbours cell.coord in
+  match cell.state with
+    | Dead  -> cells_list
+               |> List.map (fun x -> if List.mem x.coord neighbours_list then change_cell_neigh x (x.neighbours - 1) else x)
+    | Alive -> cells_list
+               |> List.map (fun x -> if List.mem x.coord neighbours_list then change_cell_neigh x (x.neighbours + 1) else x)
 
 let next_world (cur_world: cell list): cell list =
   let rec aux next = function
     | [] -> next
     | cell :: rest ->
-        let next_state = next_cell cell.state (count_neighbours cell.coord cur_world) in
-        aux ({coord=cell.coord;state=next_state}::next) rest
+        let new_state =
+          match cell.state,cell.neighbours_cpy with
+          | Alive,2 -> Alive
+          | _,3     -> Alive
+          | _,_     -> Dead
+        in
+        if cell.state = new_state then
+          (* If the cell state does not change, then just update the "neighbours_cpy" field *)
+          let new_cell = change_cell_neigh_cpy cell cell.neighbours in
+          aux (new_cell::next) rest
+        else
+          let new_cell = change_cell_state cell new_state in
+          let new_cell = change_cell_neigh_cpy new_cell new_cell.neighbours in
+          (* Here is where CPU consumption increase : *)
+          let new_next = update_neighbours_count next new_cell in
+          let new_rest = update_neighbours_count rest new_cell in
+          aux (new_cell::new_next) new_rest
   in
-  List.rev (aux [] cur_world)
-
-let world = random_world normalized_width normalized_height;;
+  List.rev (aux [] cur_world);;
 
 (* Launch window *)
 open_graph (size_to_string width height);;
@@ -92,14 +123,16 @@ let print (world: cell list): unit =
   aux world
 
 (* Launch life *)
-let bigbang world =
-  let rec aux generation world =
+let bigbang w =
+  let rec aux generation w =
     if key_pressed () = true then close_graph() else
-    if button_down () = true then aux generation world else (* pause if click *)
-      print world;
+    if button_down () = true then aux generation w else (* pause if click *)
+      print w;
       (*Printf.printf "\n%d generations.\n" generation;*)
-      aux (generation+1) (next_world world)
+      aux (generation+1) (next_world w)
   in
-  aux 0 world
+  aux 0 w
+
+let world = random_world normalized_width normalized_height
 
 let () = bigbang world
