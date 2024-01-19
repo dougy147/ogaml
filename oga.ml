@@ -2,9 +2,9 @@ open Graphics;;
 Random.self_init ();;
 
 let title  = "OGaml - Conway's Game of Life in OCaml"
-let width  = 600
-let height = 600
-let grid   = 65
+let width  = 1000
+let height = 1000
+let grid   = 60
 let scaled_width  = width  / grid ;;
 let scaled_height = height / grid ;;
 let cell_width  = width  / scaled_width ;;
@@ -17,13 +17,15 @@ let dead_color  = 0
 (*Init parameters*)
 type coord = {x: int; y: int}
 type state = Dead | Alive
-type cell  = {coord: coord; state: state; neighbours: int; neighbours_cpy: int}
+type cell  = {coord: coord; state: state; neighbours: int; neighbours_ref: int; neighbours_pos: coord list}
 let init_life_prob = 0.06 (* Probability of a cell being alive at startup *)
 
 (* Functional way of changing records (see "Real World Ocaml" p.94) *)
-let change_cell_state (c: cell) (s: state): cell = {c with state = s}
-let change_cell_neigh (c: cell) (n: int)  : cell = {c with neighbours = n}
-let change_cell_neigh_cpy (c: cell) (n: int) : cell = {c with neighbours_cpy = n}
+let change_state (c: cell) (s: state): cell = {c with state = s}
+let change_neigh (c: cell) (n: int) (change_ref: bool) : cell =
+  match change_ref with
+  | true -> {c with neighbours_ref = n; neighbours = n}
+  | false -> {c with neighbours = n}
 
 let neighbours (pos: coord) : coord list =
   let nh = cell_height and nw = cell_width in
@@ -54,7 +56,7 @@ let random_world (width: int) (height: int): cell list=
   let rec randomize_cols acc_cols (col_index: int) (row: int): cell list =
     let state = random_init_state (Random.float 1.) in
     if col_index = 0 then acc_cols
-    else randomize_cols ({coord={x=row;y=col_index};state=state;neighbours=0;neighbours_cpy=0}::acc_cols) (col_index-1) row
+    else randomize_cols ({coord={x=row;y=col_index};state=state;neighbours=0;neighbours_ref=0;neighbours_pos=neighbours {x=row;y=col_index}}::acc_cols) (col_index-1) row
   in
   let rec randomize_rows acc_rows width height: cell list =
     if height = 0 then acc_rows
@@ -63,52 +65,39 @@ let random_world (width: int) (height: int): cell list=
   let rec add_neighbours_count next cur_world = function
     | [] -> next
     | cell :: rest ->
-        let c = change_cell_neigh cell (count_neighbours cell.coord cur_world) in
-        let c = change_cell_neigh_cpy c c.neighbours in
+        let c = change_neigh cell (count_neighbours cell.coord cur_world) true in
         add_neighbours_count (c::next) cur_world rest
   in
   let r_world = randomize_rows [] width height in
   add_neighbours_count [] r_world r_world
 
-let update_neighbours_count (cells_list: cell list) (cell: cell) : cell list =
+let update_neighbours_count (cells_list: cell list) (cell: cell) (change_ref: bool) : cell list =
   (* I should link every cell to each of its neighbours at startup, that would avoid going through the whole world to change their values *)
-  let neighbours_list = neighbours cell.coord in
   match cell.state with
     | Dead  -> cells_list
-               |> List.map (fun x -> if List.mem x.coord neighbours_list then change_cell_neigh x (x.neighbours - 1) else x)
+               |> List.map (fun x -> if List.mem x.coord cell.neighbours_pos then change_neigh x (x.neighbours - 1) change_ref else x)
     | Alive -> cells_list
-               |> List.map (fun x -> if List.mem x.coord neighbours_list then change_cell_neigh x (x.neighbours + 1) else x)
-
-(* should refactor these two functinos *)
-let update_neighbours_count_cpy (cells_list: cell list) (cell: cell) : cell list =
-  let neighbours_list = neighbours cell.coord in
-  match cell.state with
-    | Dead  -> cells_list
-               |> List.map (fun x -> if List.mem x.coord neighbours_list then change_cell_neigh_cpy x (x.neighbours_cpy - 1) else x)
-    | Alive -> cells_list
-               |> List.map (fun x -> if List.mem x.coord neighbours_list then change_cell_neigh_cpy x (x.neighbours_cpy + 1) else x)
+               |> List.map (fun x -> if List.mem x.coord cell.neighbours_pos then change_neigh x (x.neighbours + 1) change_ref else x)
 
 let next_world (cur_world: cell list): cell list =
   let rec aux next = function
     | [] -> next
     | cell :: rest ->
         let new_state =
-          match cell.state,cell.neighbours_cpy with
+          match cell.state,cell.neighbours_ref with
           | Alive,2 -> Alive
           | _,3     -> Alive
           | _,_     -> Dead
         in
         if cell.state = new_state then
-          (* If the cell state does not change, then just update the "neighbours_cpy" field *)
-          let new_cell = change_cell_neigh_cpy cell cell.neighbours in
-          aux (new_cell::next) rest
+          (* If the cell state does not change, then just update the "neighbours_ref" field *)
+          aux (change_neigh cell cell.neighbours true::next) rest
         else
-          let new_cell = change_cell_state cell new_state in
-          let new_cell = change_cell_neigh_cpy new_cell new_cell.neighbours in
+          let new_cell = change_state cell new_state in
+          let new_cell = change_neigh new_cell new_cell.neighbours true in
           (* Here is where CPU consumption increase : *)
-          let new_next = update_neighbours_count next new_cell in (* need also to change "neighbours_cpy" here !*)
-          let new_next = update_neighbours_count_cpy new_next new_cell in
-          let new_rest = update_neighbours_count rest new_cell in
+          let new_next = update_neighbours_count next new_cell true in (* need also to change "neighbours_ref" here !*)
+          let new_rest = update_neighbours_count rest new_cell false in
           aux (new_cell::new_next) new_rest
   in
   List.rev (aux [] cur_world);;
@@ -145,12 +134,12 @@ let display_info generation =
 
 let bigbang w =
   let rec aux generation w (paused: bool) (display: bool) =
-    let event = wait_next_event [ Graphics.Poll ] in
+    let event = wait_next_event [ Poll ] in
     if event.Graphics.keypressed then
       match (read_key ()) with
       | 'r'    -> aux 0 (random_world cell_width cell_height) false display
       | ' '    -> aux generation w (not paused) display
-      | '\027' -> close_graph()
+      | '\027' -> clear_graph();close_graph()
       | _      -> ()
     else
       if paused = true then
