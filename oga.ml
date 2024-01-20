@@ -43,32 +43,30 @@ let neighbours (pos: coord) : coord list =
    ;{x=under_row; y=next_col}
   ]
 
-let random_world (width: int) (height: int): cell list=
-  let count_neighbours (pos: coord) (world: cell list) =
-    let neighbours_list  = neighbours pos in
-    let cur_neighbours   = List.filter (fun c -> List.mem c.coord neighbours_list) world in
-    let alive_neighbours = List.filter (fun c -> c.state = Alive) cur_neighbours in
+let count_neighbours (cell: cell) (world: cell list) =
+    let alive_neighbours = List.filter (fun c -> c.state = Alive) (List.filter (fun x -> List.mem x.coord cell.neighbours_pos) world) in
     List.length alive_neighbours
+
+let rec add_neighbours_count next cur_world = function
+  | [] -> next
+  | cell :: rest ->
+      let c = change_neigh cell (count_neighbours cell cur_world) true in
+      add_neighbours_count (c::next) cur_world rest
+
+let random_world (width: int) (height: int): cell list=
+  let random_initial_state (alea: float) = if alea < init_life_prob then Alive else Dead in
+  let rec generate_cols acc_cols (col_index: int) (row: int): cell list =
+    let state = random_initial_state (Random.float 1.) in
+    match col_index with
+    | 0 -> acc_cols
+    | _ -> generate_cols ({coord={x=row;y=col_index};state=state;neighbours=0;neighbours_ref=0;neighbours_pos=neighbours {x=row;y=col_index}}::acc_cols) (col_index-1) row
   in
-  let random_init_state (alea: float) =
-    if alea < init_life_prob then Alive else Dead
+  let rec generate_rows acc_rows width height: cell list =
+    match height with
+    | 0 -> acc_rows
+    | _ -> generate_rows ((generate_cols [] width height) @ acc_rows) width (height-1)
   in
-  let rec randomize_cols acc_cols (col_index: int) (row: int): cell list =
-    let state = random_init_state (Random.float 1.) in
-    if col_index = 0 then acc_cols
-    else randomize_cols ({coord={x=row;y=col_index};state=state;neighbours=0;neighbours_ref=0;neighbours_pos=neighbours {x=row;y=col_index}}::acc_cols) (col_index-1) row
-  in
-  let rec randomize_rows acc_rows width height: cell list =
-    if height = 0 then acc_rows
-    else randomize_rows ((randomize_cols [] width height) @ acc_rows) width (height-1)
-  in
-  let rec add_neighbours_count next cur_world = function
-    | [] -> next
-    | cell :: rest ->
-        let c = change_neigh cell (count_neighbours cell.coord cur_world) true in
-        add_neighbours_count (c::next) cur_world rest
-  in
-  let r_world = randomize_rows [] width height in
+  let r_world = generate_rows [] width height in
   add_neighbours_count [] r_world r_world
 
 let update_neighbours_count (cells_list: cell list) (cell: cell) (change_ref: bool) : cell list =
@@ -102,6 +100,27 @@ let next_world (cur_world: cell list): cell list =
   in
   List.rev (aux [] cur_world);;
 
+let init_dead_world (width: int) (height: int) =
+  let rec generate_cols acc_cols (col_index: int) (row: int): cell list =
+    match col_index with
+    | 0 -> acc_cols
+    | _ -> generate_cols ({coord={x=row;y=col_index};state=Dead;neighbours=0;neighbours_ref=0;neighbours_pos=neighbours {x=row;y=col_index}}::acc_cols) (col_index-1) row
+  in
+  let rec generate_rows acc_rows width height: cell list =
+    match height with
+    | 0 -> acc_rows
+    | _ -> generate_rows ((generate_cols [] width height) @ acc_rows) width (height-1)
+  in
+  generate_rows [] width height
+
+(* Merge list of Alive cells to a dead world *)
+let merge (cells: cell list) (dead_world: cell list): cell list =
+  let alive_pos = List.map (fun x -> x.coord) cells in
+  let correct_dead_world = List.filter (fun x -> not (List.mem x.coord alive_pos)) dead_world in
+  add_neighbours_count [] (cells@correct_dead_world) (cells@correct_dead_world)
+
+;;
+
 (* Launch window *)
 open_graph (size_to_string width height);;
 set_window_title title;;
@@ -126,27 +145,41 @@ let print (world: cell list): unit =
   in
   aux (List.filter (fun c -> c.state = Alive) world)
 
-let display_info generation =
+let display_info (generation: int) (alive: int) =
   set_color cyan;
   moveto 1 1;
-  let text = "Generation " ^ string_of_int generation in
+  let text = "Generation " ^ string_of_int generation ^ " (alive: " ^ string_of_int alive ^ ")" in
   draw_string text;;
+
+let draw_with_mouse x y world =
+  let x_on_map = if x < 0 then 0 else if x > height then height/scaled_height + 1 else x/scaled_height + 1 in
+  let y_on_map = if y < 0 then 0 else if y > width  then width/scaled_width + 1   else y/scaled_width + 1  in
+  draw_point x_on_map y_on_map 1 (scaled_width) (scaled_height);
+  let new_cell = {coord={x=x_on_map;y=y_on_map}; state=Alive; neighbours=0; neighbours_ref=0; neighbours_pos=neighbours {x=x_on_map;y=y_on_map}} in
+  if List.mem new_cell (List.filter (fun x -> x.state = Alive) world) then world else (new_cell :: world)
 
 let bigbang w =
   let rec aux generation w (paused: bool) (display: bool) =
-    let event = wait_next_event [ Poll ] in
+    let event = wait_next_event [ Poll; Button_down ] in
+    if event.Graphics.button then
+      match (mouse_pos ()) with
+      | (x,y) -> aux generation (draw_with_mouse x y w) paused display
+    else
     if event.Graphics.keypressed then
       match (read_key ()) with
-      | 'r'    -> aux 0 (random_world cell_width cell_height) false display
-      | ' '    -> aux generation w (not paused) display
-      | '\027' -> clear_graph();close_graph()
+      | 's'    -> aux 0 (merge w (init_dead_world cell_width cell_height)) false display            (* Start drawn world *)
+      | 'r'    -> aux 0 (random_world cell_width cell_height) false display                         (* Randomize a world *)
+      | ' '    -> aux generation w (not paused) display                                             (* Play/pause *)
+      | '\027' -> clear_graph();close_graph()                                                       (* Escape = exit *)
+      | 'n'    -> clear_graph(); set_color black; fill_rect 0 0 width height; aux 0 [] true display (* New empty world to draw *)
       | _      -> ()
     else
       if paused = true then
         aux generation w paused display
       else
         print w;
-        display_info generation;
+        let alive_number = List.length (List.filter (fun c -> c.state = Alive) w) in
+        display_info generation alive_number;
         aux (generation+1) (next_world w) paused display
   in
   aux 0 w false true
