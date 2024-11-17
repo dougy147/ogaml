@@ -167,11 +167,13 @@ let bigbang w =
     else
     if event.Graphics.keypressed then
       match (read_key ()) with
-      | 's'    -> aux 0 (merge w (init_dead_world cell_width cell_height)) false display            (* Start drawn world *)
+      (*| 's'    -> aux 0 (merge w (init_dead_world cell_width cell_height)) false display            (* Save drawn world *)*)
+      | 's'    -> aux 0 (merge w (init_dead_world cell_width cell_height)) true display            (* Save drawn world *)
       | 'r'    -> aux 0 (random_world cell_width cell_height) false display                         (* Randomize a world *)
       | ' '    -> aux generation w (not paused) display                                             (* Play/pause *)
       | '\027' -> clear_graph();close_graph()                                                       (* Escape = exit *)
-      | 'n'    -> clear_graph(); set_color black; fill_rect 0 0 width height; aux 0 [] true display (* New empty world to draw *)
+      | 'c'    -> clear_graph(); set_color black; fill_rect 0 0 width height; aux 0 [] true display (* Create empty world to draw *)
+      | 'n'    -> print w; aux (generation+1) (next_world w) true display
       | _      -> ()
     else
       if paused = true then

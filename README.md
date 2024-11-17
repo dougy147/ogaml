@@ -6,10 +6,11 @@ $ ocamlfind ocamlopt -o ogaml -linkpkg -package graphics oga.ml
 $ ./ogaml
 ```
 
-| Key      | Functionality                              |
-|----------|--------------------------------------------|
-| `r`      | Load and start a new random world          |
-| `n`      | New empty world (left click to draw on it) |
-| `s`      | Start current state of the world           |
-| `<Space>`| Play/pause                                 |
-| `<Esc>`  | Close                                      |
+| Key      | Functionality                                     |
+|----------|---------------------------------------------------|
+| `r`      | Load and start a new random world                 |
+| `c`      | New empty world (left click to draw on it)        |
+| `n`      | Display next generation incrementally             |
+| `s`      | Save currently drawn world (press space to start) |
+| `<Space>`| Start/pause                                       |
+| `<Esc>`  | Close                                             |
