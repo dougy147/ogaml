@@ -1,49 +1,61 @@
 open Graphics;;
 Random.self_init ();;
 
-type cell = { row: int       (* pos x *)
-            ; col: int       (* pos y *)
-            ; mutable n: cell list   (* neighbours *)
-            ; mutable s: int (* state *)
+type cell = { row: int
+            ; col: int
+            ; mutable n: cell list (* neighbours *)
+            ; mutable s:  int (* state *)
             ; mutable ns: int (* next state *)
             }
 
-let height = 120
-let width  = 120
+let life_probability = 0.049
+
+let width  = 1000
+let height = 1000
+
+let title  = "OGaml - Conway's Game of Life in OCaml"
+let grid = 250
+let scaled_width  = width / grid
+let scaled_height = height / grid
+let cell_width  = width / scaled_width
+let cell_height = width / scaled_height
+let dimensions_as_string w h = " " ^ (string_of_int (w-scaled_width)) ^ "x" ^ (string_of_int (h-scaled_height))
 
 let gen_cell (row: int) (col: int): cell =
-    let state = if Random.float 1.0 <= 0.10 then 1 else 0 in
+    let state = if Random.float 1.0 <= life_probability then 1 else 0 in
     { row ; col ; n = [] ; s = state ; ns = -1 }
 
-let map = List.init (height * width)
+let init_map = Array.init (cell_height * cell_width)
     (fun index ->
-        let row = index / width in (* integer division *)
-        let col = index mod width in
+        let row = index / cell_width in (* integer division *)
+        let col = index mod cell_width in
         gen_cell row col)
 
 let append_neighbours (map): unit =
-    let rec pop m =
-        match m with
-        | [] -> ()
-        | cell :: rest ->
-                let c_row = cell.row in
-                let c_col = cell.col in
-                cell.n <- [
-                    (*List.nth map ( ( (((c_row +- 1 mod width) + width) mod width) * width) + (((c_col +- 1 mod width) + width) mod width) )*)
-                    List.nth map ( ((((c_row - 1 mod height) + height) mod height) * width) + (((c_col - 1 mod width) + width) mod width) );
-                    List.nth map ( ((((c_row - 1 mod height) + height) mod height) * width) + (((c_col mod width) + width) mod width) )    ;
-                    List.nth map ( ((((c_row - 1 mod height) + height) mod height) * width) + (((c_col + 1 mod width) + width) mod width) );
-                    List.nth map ( ((((c_row mod height) + height) mod height)     * width) + (((c_col - 1 mod width) + width) mod width) )    ;
-                    List.nth map ( ((((c_row mod height) + height) mod height)     * width) + (((c_col + 1 mod width) + width) mod width) )    ;
-                    List.nth map ( ((((c_row + 1 mod height) + height) mod height) * width) + (((c_col - 1 mod width) + width) mod width) );
-                    List.nth map ( ((((c_row + 1 mod height) + height) mod height) * width) + (((c_col mod width) + width) mod width) )    ;
-                    List.nth map ( ((((c_row + 1 mod height) + height) mod height) * width) + (((c_col + 1 mod width) + width) mod width) );
-                ];
-                pop rest
-    in
-    pop map
+    for i = 0 to (Array.length map - 1) do
+        let cell = map.(i) in
+        let c_row = cell.row in
+        let c_col = cell.col in
+        let prev_col = (((c_col - 1 mod cell_width) + cell_width) mod cell_width) in
+        let prev_row = (((c_row - 1 mod cell_height) + cell_height) mod cell_height) in
+        let same_col = (((c_col mod cell_width) + cell_width) mod cell_width) in
+        let same_row = (((c_row mod cell_height) + cell_height) mod cell_height) in
+        let next_col = (((c_col + 1 mod cell_width) + cell_width) mod cell_width) in
+        let next_row = (((c_row + 1 mod cell_height) + cell_height) mod cell_height) in
+        cell.n <- [
+            map.( (prev_row * cell_width) + prev_col );
+                    map.( (prev_row * cell_width) + same_col );
+                    map.( (prev_row * cell_width) + next_col );
+                    map.( (same_row * cell_width) + prev_col );
+                    map.( (same_row * cell_width) + next_col );
+                    map.( (next_row * cell_width) + prev_col );
+                    map.( (next_row * cell_width) + same_col );
+                    map.( (next_row * cell_width) + next_col );
+    ];
+    done;;
 
-let init_world = append_neighbours map
+let init_world = append_neighbours init_map
+let map = Array.to_list init_map
 
 let compute_next_state (map): unit =
     let rec comp m =
@@ -73,21 +85,13 @@ let refresh_state (map): unit =
     in
     refresh map
 
-
+;;
 
 (* Launch window *)
-
-let title  = "OGaml - Conway's Game of Life in OCaml"
-let cell_size = 6 ;; (* puixels *)
-let scaled_width  = cell_size ;;
-let scaled_height = cell_size ;;
-let cell_width  = cell_size ;;
-let cell_height = cell_size ;;
-let size_to_string w h = " " ^ (string_of_int (w-scaled_width)) ^ "x" ^ (string_of_int (h-scaled_height));;
-open_graph (size_to_string (width * cell_size) (height * cell_size));;
+open_graph (dimensions_as_string width height);;
 set_window_title title;;
 set_color black;
-fill_rect 0 0 (width * cell_size) (height * cell_size);; (* black background "hack" *)
+fill_rect 0 0 width height;; (* black background "hack" *)
 
 let alive_color = 1
 let dead_color  = 0
@@ -99,19 +103,22 @@ let draw_point x y state size_w size_h =
 
 let print (world: cell list): unit =
   set_color black;
-  fill_rect 0 0 (width * cell_size) (height * cell_size);
-  let rec aux = function
+  fill_rect 0 0 width height;
+  let rec p = function
     | [] -> ()
     | cell :: tl ->
-        draw_point cell.row cell.col alive_color (scaled_width) (scaled_height);
-        aux tl
+        draw_point cell.row cell.col alive_color scaled_width scaled_height;
+        p tl
   in
-  aux (List.filter (fun c -> c.s = 1) world)
+  p (List.filter (fun c -> c.s = 1) world)
 
-let rec bigbang w =
-    print w;
+let update_world map =
     compute_next_state map;
-    refresh_state map;
-    bigbang w
+    refresh_state map
+
+let rec bigbang world =
+    print world;
+    update_world world;
+    bigbang world
 
 let () = bigbang map
